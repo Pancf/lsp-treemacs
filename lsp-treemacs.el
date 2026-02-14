@@ -776,11 +776,15 @@ implementations automatically."
 
 ;; Call hierarchy.
 
-(lsp-defun lsp-treemacs--call-hierarchy-ret-action ((&CallHierarchyItem :uri :selection-range (&Range :start)))
-  "Build the ret action for a call hierarchy item using URI and START range."
-  (lsp-treemacs--open-file-in-mru (lsp--uri-to-path uri))
-  (goto-char (lsp--position-to-point start))
-  (run-hooks 'xref-after-jump-hook))
+(lsp-defun lsp-treemacs--call-hierarchy-ret-action ((&CallHierarchyItem :uri :selection-range (&Range :start))
+                                                    &optional callsite-start callsite-uri)
+  "Build the ret action for a call hierarchy item.
+Prefer CALLSITE-START and CALLSITE-URI when provided."
+  (let ((target-uri (or callsite-uri uri))
+        (target-start (or callsite-start start)))
+    (lsp-treemacs--open-file-in-mru (lsp--uri-to-path target-uri))
+    (goto-char (lsp--position-to-point target-start))
+    (run-hooks 'xref-after-jump-hook)))
 
 (defun lsp-treemacs--call-hierarchy-children (buffer method outgoing node callback)
   (-let [item (plist-get node :item)]
@@ -797,6 +801,16 @@ implementations automatically."
                       (if outgoing
                           (lsp:call-hierarchy-outgoing-call-to node)
                         (lsp:call-hierarchy-incoming-call-from node)))
+                     (ranges (if outgoing
+                                 (lsp:call-hierarchy-outgoing-call-from-ranges node)
+                               (lsp:call-hierarchy-incoming-call-from-ranges node)))
+                     (callsite-range (seq-first ranges))
+                     (callsite-start (when callsite-range
+                                       (lsp:range-start callsite-range)))
+                     (callsite-uri (when callsite-start
+                                     (if outgoing
+                                         (lsp:call-hierarchy-item-uri item)
+                                       (lsp:call-hierarchy-item-uri child-item))))
                      (label (lsp-render-symbol child-item t)))
                (list :label label
                      :key label
@@ -804,7 +818,10 @@ implementations automatically."
                      :children-async (-partial #'lsp-treemacs--call-hierarchy-children buffer method outgoing)
                      :ret-action (lambda (&rest _)
                                    (interactive)
-                                   (lsp-treemacs--call-hierarchy-ret-action child-item))
+                                   (lsp-treemacs--call-hierarchy-ret-action
+                                    child-item
+                                    callsite-start
+                                    callsite-uri))
                      :item child-item)))
            result)))
        :mode 'detached))))
